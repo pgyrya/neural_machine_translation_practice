@@ -53,10 +53,6 @@ df  = df1[df1['before'].apply(len)<=10].reset_index(drop=True)
 #print sample
 #print(df.loc[9:28,['class', 'before','after']])
 
-
-
-
-
 number_of_input_phrases              = df.shape[0]
 print('Selected %i records out of %i for modeling.'%(number_of_input_phrases,total_number_of_input_phrases))
 
@@ -64,7 +60,7 @@ print('Selected %i records out of %i for modeling.'%(number_of_input_phrases,tot
 #df.shape
 
 #Split input data into development, validation and testing data frames
-np.random.seed(217)
+random.seed(217)
 df['r'] = [random.uniform(0,1) for _ in df.index]
 df.to_csv('en_train_cardinals.csv')
 #print(df['r'])
@@ -108,9 +104,9 @@ str_to_list_output ('Test Test 1 2 3')
 #output_list_of_lists= df['after'].apply(str_to_list_output)
 # TODO - consider appending start and end tokens to beginning and the end
 
-input_symbols_counter = Counter([i for slist in df['before'].apply(str_to_list_input) 
+input_symbols_counter = Counter([i for slist in df1['before'].apply(str_to_list_input) 
                                  for i in slist])
-output_symbols_counter= Counter([i for slist in df['after'].apply(str_to_list_output) 
+output_symbols_counter= Counter([i for slist in df1['after'].apply(str_to_list_output) 
                                  for i in slist]) 
 
 #len(input_symbols_counter)
@@ -150,6 +146,38 @@ print ('Number of distinct output tokens used:', num_distinct_output_tokens)
 print ('%d symbols represented via default input token.' % (len(output_token_index) - num_distinct_output_tokens + 1) )
 
 #print(input_token_appearances)
+
+###############################################################################
+# Review dataset by input and output length
+###############################################################################
+df1['input_length']  = df1['before'].apply(count_input_tokens) 
+df1['output_length'] = df1['after'].apply(count_output_tokens) 
+input_appearances_by_length = df1['input_length'].value_counts().sort_index() #.sort_values(ascending = False)
+output_appearances_by_length = df1['output_length'].value_counts().sort_index() #.sort_values(ascending = False)
+input_appearences_by_length  =  input_appearances_by_length.sort_index()
+output_appearences_by_length = output_appearances_by_length.sort_index()
+
+
+plt.clf()
+#plt.subplot(121)
+plt.bar(range(len(input_appearances_by_length)),input_appearances_by_length)
+plt.xticks(range(len(input_appearances_by_length)), input_appearances_by_length.index)
+#plt.hist(df1['input_length'], bins = 10)
+plt.xlabel('Number of input tokens (symbols)')
+plt.ylabel('Appearances, log scale')
+plt.yscale('log')
+plt.show()
+
+#plt.hist(df1['output_length'], bins = 10)
+#plt.subplot(122)
+plt.clf()
+plt.bar(range(len(output_appearences_by_length)),output_appearences_by_length)
+plt.xticks(range(len(output_appearences_by_length)), output_appearences_by_length.index)
+plt.xlabel('Number of output tokens (words)')
+plt.ylabel('Appearances, log scale')
+plt.yscale('log')
+plt.show()
+
 
 ###############################################################################
 # Step 2   - Transform imported data into vector form
@@ -282,7 +310,7 @@ dims = [64]
 from recurrentshop import LSTMCell, RecurrentSequential
 from seq2seq.cells import LSTMDecoderCell, AttentionDecoderCell
 from keras.models import Sequential, Model
-from keras.layers import Dense, Dropout, TimeDistributed, Bidirectional, Input
+from keras.layers import Dense, Dropout, TimeDistributed, Bidirectional, Input, Activation
 
 def AttentionSeq2Seq(output_dim, 
                      output_length, 
@@ -374,14 +402,16 @@ def AttentionSeq2Seq(output_dim,
             decoder.add(LSTMDecoderCell(output_dim=hidden_dim, hidden_dim=hidden_dim))
         decoder.add(Dropout(dropout))
         decoder.add(LSTMDecoderCell(output_dim=output_dim, 
-                                    hidden_dim=hidden_dim,
-                                    activation = 'softmax'))
+                                    hidden_dim=hidden_dim))
+        decoder.add(Activation('softmax'))
+        
+                                    
     
     inputs         = [_input]
     decoded        = decoder(encoded)
     model          = Model(inputs, decoded)
     
-    # layers providing transparency into model operations
+    # considering layers providing transparency into model operations
     #attention_map  = recurrent_decoder_cell.build_model(recurrent_decoder_cell.)
     #attention_flow = Model(inputs, recurrent_decoder_cell)
     
@@ -422,14 +452,18 @@ np.random.seed(1234)
 
 class LossHistory(keras.callbacks.Callback):
     def on_train_begin(self, logs={}):
-       if hasattr(self, 'losses') ==False:
-           self.losses   = []
-           #self.accuracy = []
+        if hasattr(self, 'loss') ==False:
+            self.loss         = []
+            self.val_loss     = []
+            self.accuracy     = []
+            self.val_accuracy = []
            #self.lr       = []
  
     def on_epoch_end(self, batch, logs={}):
-       self.losses.append(logs.get('loss'))
-       #self.accuracy.append(logs.get('accuracy'))
+        self.loss.append(logs.get('loss'))
+        self.val_loss.append(logs.get('val_loss'))
+        self.accuracy.append(logs.get('weighted_acc'))
+        self.val_accuracy.append(logs.get('val_weighted_acc'))
        #self.lr.append(step_decay(len(self.losses)))
 
 global_loss_history = LossHistory()
@@ -505,75 +539,94 @@ from keras.optimizers import *
 # keras.optimizers.RMSprop(lr=0.001, rho=0.9, epsilon=1e-08, decay=0.0)
 # keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
 # keras.optimizers.SGD(lr=0.01, momentum=0.0, decay=0.0, nesterov=False)
-#
 # common settings available to all optimizers: clipnorm, clipvalue
-# 
 
-# Try Adam Optimizer
-#adam_optimizer      = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0, clipnorm=10.)
-#adam_optimizer_fast = keras.optimizers.Adam(lr=0.5  , beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0) #, clipnorm=10. #consider clipping norm later
-#model.load_weights('saved_models/best.hdf5')
-#compile_and_fit_the_model(epochs = 1 , initial_epoch = 0 , optimizer = adam_optimizer_fast, filter_categories= {'CARDINAL'}, batch_size = 32 , compile_needed   = True)
-#compile_and_fit_the_model(epochs = 10, initial_epoch = 1 , optimizer = adam_optimizer_fast, filter_categories= {'CARDINAL'}, batch_size = 64                          ) 
-#compile_and_fit_the_model(epochs = 12, initial_epoch = 10, optimizer = 'rmsprop'          , filter_categories= {'CARDINAL'}, batch_size = 1                           ) 
 
-# Try RMSProp Optimizer - finds local minimum with below settings
-#compile_and_fit_the_model(epochs = 1   , initial_epoch = 0  , batch_size = 16, new_optimizer = RMSprop(lr=0.25)    ) 
-#compile_and_fit_the_model(epochs = 5   , initial_epoch = 1  , batch_size = 32) 
-#compile_and_fit_the_model(epochs = 50  , initial_epoch = 5  , batch_size = 64) 
-#compile_and_fit_the_model(epochs = 100 , initial_epoch = 50 , batch_size = 1024) # doesn't help improve the model
-#compile_and_fit_the_model(epochs = 110 , initial_epoch = 100, batch_size = 128 ) 
-#compile_and_fit_the_model(epochs = 120 , initial_epoch = 110, batch_size = 128 , new_optimizer = RMSprop(lr=0.05)    ) 
-#compile_and_fit_the_model(epochs = 130 , initial_epoch = 120, batch_size = 256 , new_optimizer = RMSprop(lr=0.01, decay = 1e-5)    ) #making gradient calculation more and more precise
-#compile_and_fit_the_model(epochs = 200 , initial_epoch = 130, batch_size = 256 , new_optimizer = RMSprop(lr=0.02, decay = 1e-5), verbose = False    ) # hope for faster convergence .. 2.41474 to 2.41400
-#compile_and_fit_the_model(epochs = 766 , initial_epoch = 200, batch_size = 64 , new_optimizer = RMSprop(lr=0.05, decay = 1e-5), verbose = False    ) # hope for faster convergence .. 2.41474 to 2.41400
+#compile_and_fit_the_model(epochs = 10   , initial_epoch = 0  , batch_size = 1, new_optimizer = 'rmsprop') 
+#compile_and_fit_the_model(epochs = 20   , initial_epoch = 10  , batch_size = 128) 
+#compile_and_fit_the_model(epochs = 30   , initial_epoch = 20  , batch_size = 256) 
+#compile_and_fit_the_model(epochs = 50   , initial_epoch = 30  , batch_size = 1024) 
+#compile_and_fit_the_model(epochs = 100   , initial_epoch = 50  , batch_size = 1024) 
+#compile_and_fit_the_model(epochs = 500   , initial_epoch = 100  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
 
-# Try SGD
-#compile_and_fit_the_model(epochs = 20   , initial_epoch = 0   , batch_size = 32, new_optimizer = SGD(lr=0.05, momentum=0.8, decay=1e-4, nesterov=True)    )  
-#compile_and_fit_the_model(epochs = 20   , initial_epoch = 10  , batch_size = 32)
 
-# Try RMSProp optimizer with default settings, batch size of 1 observation, and go through the training data 10 times
-compile_and_fit_the_model(epochs = 10   , initial_epoch = 0  , batch_size = 1, new_optimizer = 'rmsprop') 
-compile_and_fit_the_model(epochs = 20   , initial_epoch = 10  , batch_size = 128) 
-compile_and_fit_the_model(epochs = 30   , initial_epoch = 20  , batch_size = 256) 
-compile_and_fit_the_model(epochs = 50   , initial_epoch = 30  , batch_size = 1024) 
-compile_and_fit_the_model(epochs = 100   , initial_epoch = 50  , batch_size = 1024) 
-compile_and_fit_the_model(epochs = 500   , initial_epoch = 100  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
+# new optimization as of Nov 14
 #load best model calibrated yet, as per validation sample
+#model.load_weights('saved_models/best_Nov5.hdf5')
+
+#compile_and_fit_the_model(epochs = 1   , initial_epoch = 0  , batch_size = 1, new_optimizer = 'rmsprop') 
+
+compile_and_fit_the_model(epochs        = 10 , 
+                          initial_epoch = 0  , 
+                          batch_size    = 256, 
+                          new_optimizer = RMSprop(lr=0.001, decay = 0.0001)) 
+
+compile_and_fit_the_model(epochs        = 125 , 
+                          initial_epoch = 10  , 
+                          batch_size    = 256, 
+                          file_label    = 'best_Nov14_125epochs',
+                          new_optimizer = RMSprop(lr=0.001, decay = 0.000005)) 
+
+model.load_weights('saved_models/best_Nov14_125epochs.hdf5')
+# switch to smaller batches in hopes of escaping plateau sooner
+compile_and_fit_the_model(epochs        = 200 , 
+                          initial_epoch = 125 , 
+                          file_label    = 'best_Nov14_200epochs',
+                          batch_size    = 16 ) 
 
 
-model.load_weights('saved_models/best_Nov5.hdf5')
-compile_and_fit_the_model(epochs = 600   , initial_epoch = 500  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
-#compile_and_fit_the_model(epochs = 700   , initial_epoch = 600  , batch_size = 256, new_optimizer = SGD(lr=0.00001)) # trained epochs 600-634
-model.load_weights('saved_models/best.hdf5')
-compile_and_fit_the_model(epochs = 650   , initial_epoch = 635  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
-model.load_weights('saved_models/best.hdf5')
-compile_and_fit_the_model(epochs = 700   , initial_epoch = 650  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
+# does not work at all - lets delete this training history
+#compile_and_fit_the_model(epochs        = 500 , 
+#                          initial_epoch = 200 , 
+#                          batch_size    = 256, 
+#                          file_label    = 'best_Nov15_200_500',
+#                          new_optimizer = SGD(lr=0.1, decay = 0.0001)) 
 
-model.load_weights('saved_models/best_Nov5.hdf5')
-compile_and_fit_the_model(epochs = 706   , initial_epoch = 700  , batch_size = 256, new_optimizer = RMSprop(lr=0.0001)) 
-compile_and_fit_the_model(epochs = 800   , initial_epoch = 706  , batch_size = 32, new_optimizer = RMSprop(lr=0.0001)) 
-
-
+#model.load_weights('saved_models/best_Nov14_200epochs.hdf5')
+#compile_and_fit_the_model(epochs        = 300 , 
+#                          initial_epoch = 200 , 
+#                          batch_size    = 256, 
+#                          file_label    = 'best_Nov15_200_300',
+#                          new_optimizer = RMSprop(lr=0.0001)) 
+#
+#model.load_weights('saved_models/best_Nov15_200_300.hdf5')
+#compile_and_fit_the_model(epochs        = 400 , 
+#                          initial_epoch = 300 , 
+#                          batch_size    = 16, 
+#                          file_label    = 'best_Nov15_300_400',
+#                          new_optimizer = SGD(lr=0.1, clipnorm = 1)) 
+#
+##model.load_weights('saved_models/best_Nov15_200_300.hdf5', by_name = False)
+#compile_and_fit_the_model(epochs        = 10 , 
+#                          initial_epoch = 0 , 
+#                          batch_size    = 1024, 
+#                          file_label    = 'best_adam_10',
+#                          new_optimizer = Adam(lr=0.5, clipnorm = 100)) 
 
 ###############################################################################
-# TODO: visualize model performance over time (weighted accuracy, loss)
+# Visualize model performance over time (weighted accuracy, loss)
 ###############################################################################
 def plot_training_history(
-        series      = global_loss_history.losses, 
-        x_axis_name = 'epoch',
-        y_axis_name = 'categorical cross-entropy loss'
+        data           = {'training': global_loss_history.loss, 'validation':  global_loss_history.val_loss}, 
+        x_axis_name    = 'epoch',
+        y_axis_name    = 'categorical cross-entropy loss',
+        y_limit_bottom = 0
         ):
-    plt.plot(range(len(series)), series)
-    #plt.legend(loc=2)
+    for metric_name, series in data.items():
+        # TODO may want to ignore certain epoch indices
+        plt.plot(range(len(series)), series, label = metric_name)
+    
+    # add chart labelling
+    plt.legend(loc=4)
     plt.xlabel(x_axis_name)
     plt.ylabel(y_axis_name)
+    if y_limit_bottom is not None: plt.gca().set_ylim(bottom=y_limit_bottom)
+    plt.show()
 
 
-plot_training_history(global_loss_history.losses[0:10])    
-plot_training_history(global_loss_history.losses[0:30])    
-    
-#model.evaluate_generator(generator, 100)
+plot_training_history() 
+plot_training_history( {'training': global_loss_history.accuracy, 'validation':  global_loss_history.val_accuracy},
+                     y_axis_name = 'weighted accuracy', y_limit_bottom = None)
 
 
 ###############################################################################
@@ -586,7 +639,7 @@ plot_training_history(global_loss_history.losses[0:30])
 ###############################################################################
 
 
-def sort_and_plot(array_of_values = None, lookup_labels = None, top_N = 5):
+def sort_and_plot(array_of_values = None, lookup_labels = None, top_N = 3):
     #plot 10 highest value elements in the dictionary
     
     dict1 = dict([(label, value)  for value, label in zip(array_of_values, lookup_labels)])
@@ -597,8 +650,8 @@ def sort_and_plot(array_of_values = None, lookup_labels = None, top_N = 5):
     ind = np.arange(elements_to_plot,0,-1)
     
     plt.clf()
-    plt.barh(ind, dict2.values())
-    plt.yticks(ind, dict2.keys())
+    plt.barh(ind, list(dict2.values()))
+    plt.yticks(ind, list(dict2.keys()))
     plt.show()
     return
 
@@ -633,7 +686,8 @@ def decode_sequence(input_seq = None, graph_likely = True, show_attention_flow =
         #output_token_scores = decoder_model.predict([target_seq] + states_value)
         output_token_scores = output_tokens_scores[number_of_words_in_translated_sentence,:]
         
-        #print('Probability scores for this token sum up to %i%%'%int(100*output_token_scores.sum()))
+        if graph_likely == True: print('Probability scores for this token sum up to %i%%'%int(100*output_token_scores.sum()),
+                                       'Probability scores are:', output_token_scores)
         
         #print('Next token scores', output_token_scores) 
         
@@ -694,10 +748,13 @@ def translate(sentence = None, graph_likely = False, show_attention_flow = False
     #vectorized_sentence = vectorize('\t' + sentence) 
     vectorized_sentence = vectorize(sentence.lower()) 
     #print('Number of symbols in vectorized sentence is %i: '%vectorized_sentence.sum())
-    decoded = decode_sequence(vectorized_sentence, graph_likely, show_attention_flow)[0:-2] #omit end token
+    decoded = decode_sequence(vectorized_sentence, graph_likely, show_attention_flow)
+    if decoded[-2:] == ' \n': decoded = decoded[0:-2] #omit end token
     #print (decoded)
     return decoded
     
+#model.load_weights('saved_models/best_Nov14_200epochs.hdf5')
+model.load_weights('saved_models/best_Nov15_200_300.hdf5')
 
 # Test translation mechanism
 translate('911', True)
@@ -713,8 +770,9 @@ translate('100', True)
 translate('12', True)
 translate('LXXXVIII', True)
 translate('-742,791', True)
-#translate('10001')
-#translate('1000')
+translate('CLXXXIII', True)
+translate('20151956')
+translate('-999,999')
 #translate('1005')
 #translate('10003')
 #translate('20003')
@@ -793,7 +851,10 @@ def validate_only(observations = 1, filter_categories = 'CARDINALS'):
 # 2) evaluate accuracy
 ###############################################################################
 
-model.load_weights('saved_models/best_Nov5.hdf5')
+#model.load_weights('saved_models/best_Nov5.hdf5')
+#model.load_weights('saved_models/best_Nov14_200epochs.hdf5')
+model.load_weights('saved_models/best_Nov15_200_300.hdf5')
+
 
 from pandas import ExcelWriter
 def save_data_frame_to_Excel(dataset, save_data_to = 'saved.xls'):
@@ -821,7 +882,10 @@ def translate_dataset(dataset = None, save_data_to = 'translated.xlsx', append =
     return
 
 
-translate_dataset(df_test, save_data_to = 'test_translated_Nov8v4.xls')
+#translate_dataset(df_test, save_data_to = 'test_translated_Nov9.xls')
+#translate_dataset(df_test, save_data_to = 'test_translated_Nov14_attention.xls')
+translate_dataset(df_test, save_data_to = 'test_translated_Nov15_attention.xls')
+
 #translate_dataset(dataset = df_val)
 #translate_dataset(df_train)
 
